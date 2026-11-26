@@ -24,7 +24,7 @@ def calculate_mrr(ranked_items):
     reciprocal_ranks = []
     for rank, score in enumerate(ranked_items, start=1):
         if score > 0:  # 相关性评分大于 0 表示相关
-            reciprocal_ranks.append(rank / rank)
+            reciprocal_ranks.append(1 / rank)
             break
 
     return np.mean(reciprocal_ranks) if reciprocal_ranks else 0.0
