@@ -1,59 +1,82 @@
-# utils/task.py
+"""Shared LLM client configuration and API helpers.
+
+Credentials are loaded from config/api_config.yaml (git-ignored).
+OPENAI_API_KEY and OPENAI_BASE_URL environment variables override file values.
+"""
+import os
 import re
+from pathlib import Path
 
 import yaml
 from openai import OpenAI
 
-with open('system_config.yaml') as f:
-    config = yaml.load(f, Loader=yaml.FullLoader)
-model = config['MODEL']
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SYSTEM_CONFIG_PATH = PROJECT_ROOT / "system_config.yaml"
+API_CONFIG_PATH = PROJECT_ROOT / "config" / "api_config.yaml"
 
 
+def _load_yaml(path):
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as file:
+        return yaml.safe_load(file) or {}
 
-def get_completion(messages, llm=model, temperature=0):  # claude-3-5-sonnet-20240620 gpt-4o-2024-08-06 qwen-plus
-    client = OpenAI(
-        base_url="",
-        api_key=""
-    )
-    tokens = 5000
+
+def _load_settings():
+    system_config = _load_yaml(SYSTEM_CONFIG_PATH)
+    api_config = _load_yaml(API_CONFIG_PATH)
+    llm_config = api_config.get("llm", api_config)
+
+    model = llm_config.get("model") or system_config.get("MODEL", "gpt-4o")
+    base_url = os.getenv("OPENAI_BASE_URL") or llm_config.get("base_url")
+    api_key = os.getenv("OPENAI_API_KEY") or llm_config.get("api_key")
+
+    if not api_key:
+        raise RuntimeError(
+            "Missing LLM API key. Copy config/api_config.example.yaml to "
+            "config/api_config.yaml and fill in api_key, or set OPENAI_API_KEY."
+        )
+    return model, base_url, api_key
+
+
+def _create_client():
+    model, base_url, api_key = _load_settings()
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    return OpenAI(**kwargs), model
+
+
+def get_completion(messages, llm=None, temperature=0):
+    client, configured_model = _create_client()
     response = client.chat.completions.create(
-        model=llm,
+        model=llm or configured_model,
         messages=messages,
-        temperature=1,
-        timeout=50,
-        max_tokens=tokens,
-        top_p=0.1
+        temperature=temperature,
+        timeout=90,
+        max_tokens=5000,
+        top_p=0.1,
     )
-    # print("当前prompt：", messages)
-    # print("当前llm输出：", response)
-
     return response.choices[0].message.content
 
 
-def get_json(messages, json_format, llm=model, temperature=0):
-
-    client = OpenAI(
-        # base_url="",
-        # api_key=""
-    )
-
-    response = client.beta.chat.completions.parse(
-        model=llm,
+def get_json(messages, json_format=None, llm=None, temperature=0):
+    """Request a JSON object through the broadly supported Chat Completions API."""
+    client, configured_model = _create_client()
+    response = client.chat.completions.create(
+        model=llm or configured_model,
         messages=messages,
         temperature=temperature,
-        timeout=50,
+        timeout=90,
         max_tokens=1000,
-        response_format=json_format
+        response_format={"type": "json_object"},
     )
-
     return response.choices[0].message.content
 
 
 def extract_braces_content(s):
-    s = s.replace("\\'", "'")
-    # 使用正则表达式匹配最前面的{和最后面的}之间的所有内容
-    match = re.search(r'\{.*\}', s, re.DOTALL)
-    if match:
-        return match.group(0)
-    else:
+    if not s:
         return None
+    s = s.replace("\\'", "'")
+    match = re.search(r"\\{.*\\}", s, re.DOTALL)
+    return match.group(0) if match else None
