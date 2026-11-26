@@ -26,15 +26,13 @@ def _load_settings():
     system_config = _load_yaml(SYSTEM_CONFIG_PATH)
     api_config = _load_yaml(API_CONFIG_PATH)
     llm_config = api_config.get("llm", api_config)
-
     model = llm_config.get("model") or system_config.get("MODEL", "gpt-4o")
     base_url = os.getenv("OPENAI_BASE_URL") or llm_config.get("base_url")
     api_key = os.getenv("OPENAI_API_KEY") or llm_config.get("api_key")
-
     if not api_key:
         raise RuntimeError(
             "Missing LLM API key. Copy config/api_config.example.yaml to "
-            "config/api_config.yaml and fill in api_key, or set OPENAI_API_KEY."
+            "config/api_config.yaml and fill in llm.api_key, or set OPENAI_API_KEY."
         )
     return model, base_url, api_key
 
@@ -47,31 +45,30 @@ def _create_client():
     return OpenAI(**kwargs), model
 
 
-def get_completion(messages, llm=None, temperature=0):
+def get_completion(messages, llm=None, temperature=0, response_format=None):
     client, configured_model = _create_client()
-    response = client.chat.completions.create(
-        model=llm or configured_model,
-        messages=messages,
-        temperature=temperature,
-        timeout=90,
-        max_tokens=5000,
-        top_p=0.1,
-    )
+    kwargs = {
+        "model": llm or configured_model,
+        "messages": messages,
+        "temperature": temperature,
+        "timeout": 90,
+        "max_tokens": 5000,
+        "top_p": 0.1,
+    }
+    if response_format:
+        kwargs["response_format"] = response_format
+    response = client.chat.completions.create(**kwargs)
     return response.choices[0].message.content
 
 
 def get_json(messages, json_format=None, llm=None, temperature=0):
     """Request a JSON object through the broadly supported Chat Completions API."""
-    client, configured_model = _create_client()
-    response = client.chat.completions.create(
-        model=llm or configured_model,
-        messages=messages,
+    return get_completion(
+        messages,
+        llm=llm,
         temperature=temperature,
-        timeout=90,
-        max_tokens=1000,
         response_format={"type": "json_object"},
     )
-    return response.choices[0].message.content
 
 
 def extract_braces_content(s):
