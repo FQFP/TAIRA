@@ -32,6 +32,8 @@ class PatternMatcher:
         Returns:
             Tuple of (pattern_key, pattern_content)
         """
+        # Reload on every request so patterns distilled by previous tasks are immediately reusable.
+        self.patterns = self._load_patterns()
         if not self.patterns:
             return None, None
 
