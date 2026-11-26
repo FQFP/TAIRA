@@ -1,20 +1,16 @@
-QUERY_NUMBER: 200 #limit the size of the dataset
+QUERY_NUMBER: 200
 TOPN_ITEMS: 500
 TOPK_ITEMS: 10
-#DOMAIN: "amazon_clothing"
-#DOMAIN: "amazon_beauty"
-DOMAIN: "amazon_music"
 
-MODEL: "gpt-4o-2024-08-06"
-#MODEL: "claude-3-5-sonnet-20240620"
-#MODEL: "qwen-plus-2024-09-19"
+# Select the recommendation domain.
+# Available in the current repository: amazon_clothing, amazon_music
+DOMAIN: "amazon_clothing"
 
+# LLM model name is configured in config/api_config.yaml.
 METHOD: "TAIRA"
 
-OPENAI_BASE_URL: "https://api.openai.com/v1"
-OPENAI_API_KEY: "sk-"
+# Search backend will be implemented as a separately configurable component.
+SEARCH_MODE: "deepseek"
 
-GOOGLE_API_KEY: ""
-GOOGLE_CSE_ID: ""
-# Enable pattern learning from execution (Thought Pattern Distillation)
-ENABLE_LEARNING: false  # Set to true to enable automatic pattern learning
+# Thought Pattern Distillation must be enabled for this project.
+ENABLE_LEARNING: true
