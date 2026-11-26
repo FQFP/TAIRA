@@ -25,9 +25,11 @@ class TAIRAManager:
         self.preference = preference
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
-        self.pattern_matcher = PatternMatcher()
+        project_root = Path(__file__).resolve().parents[1]
+        pattern_dir = project_root / "storage" / "thought_patterns"
+        self.pattern_matcher = PatternMatcher(str(pattern_dir / "patterns.json"))
         self.hierarchical_planner = HierarchicalPlanner(config, logger)
-        self.pattern_distiller = PatternDistiller()
+        self.pattern_distiller = PatternDistiller(str(pattern_dir))
         self.agents = {}
         self.turn = 0
         self.execution_log = []
@@ -171,7 +173,8 @@ class TAIRAManager:
             task_plan = {"sub_tasks": new_plan["sub_tasks"]}
 
     def _save_pending_failure(self, task_route, used_pattern_key):
-        pending_path = Path("storage/thought_patterns/pending_failures.json")
+        project_root = Path(__file__).resolve().parents[1]
+        pending_path = project_root / "storage" / "thought_patterns" / "pending_failures.json"
         pending_path.parent.mkdir(parents=True, exist_ok=True)
         if pending_path.exists():
             try:
