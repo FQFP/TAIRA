@@ -142,7 +142,7 @@ class PatternDistiller:
         self,
         task_route: Dict,
         expert_correction: str,
-        failed_pattern_key: str
+        failed_pattern_key: Optional[str]
     ) -> str:
         """
         Refine pattern based on expert-corrected failure.
