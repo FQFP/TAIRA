@@ -93,8 +93,9 @@ class PatternDistiller:
             prompt += (
                 f"\n\nA similar pattern exists:\n"
                 f"{json.dumps(old_pattern, indent=2, ensure_ascii=False)}\n\n"
-                "Consider refining this pattern or creating a new one if "
-                "the task differs significantly."
+                "Return a JSON object with an additional action field set to "
+                "'update' if this existing pattern should be refined, or 'new' "
+                "if this task requires a distinct reusable pattern. "
             )
 
         messages = [
@@ -110,8 +111,16 @@ class PatternDistiller:
             if not match:
                 raise json.JSONDecodeError('No JSON object found', response or '', 0)
             new_pattern = json.loads(match.group(0))
-            pattern_key = self._generate_pattern_key()
-            self.patterns[pattern_key] = new_pattern
+            required = {"task_description", "solution_description", "thought_template"}
+            if not required.issubset(new_pattern):
+                raise ValueError("Distilled pattern is missing required fields.")
+            action = str(new_pattern.pop("action", "new")).lower()
+            if action == "update" and similar_pattern_key in self.patterns:
+                pattern_key = similar_pattern_key
+                self.patterns[pattern_key] = new_pattern
+            else:
+                pattern_key = self._generate_pattern_key()
+                self.patterns[pattern_key] = new_pattern
 
             # Log distillation
             self.distillation_log.append({
@@ -146,11 +155,7 @@ class PatternDistiller:
         Returns:
             Key of updated pattern
         """
-        if failed_pattern_key not in self.patterns:
-            print(f"Pattern {failed_pattern_key} not found")
-            return None
-
-        old_pattern = self.patterns[failed_pattern_key]
+        old_pattern = self.patterns.get(failed_pattern_key) if failed_pattern_key else None
 
         sys_prompt = (
             "You are a thought pattern refiner. You learn from failures "
@@ -186,20 +191,27 @@ class PatternDistiller:
             if not match:
                 raise json.JSONDecodeError('No JSON object found', response or '', 0)
             refined_pattern = json.loads(match.group(0))
-            self.patterns[failed_pattern_key] = refined_pattern
+            required = {"task_description", "solution_description", "thought_template"}
+            if not required.issubset(refined_pattern):
+                raise ValueError("Refined pattern is missing required fields.")
+            if failed_pattern_key and failed_pattern_key in self.patterns:
+                pattern_key = failed_pattern_key
+            else:
+                pattern_key = self._generate_pattern_key()
+            self.patterns[pattern_key] = refined_pattern
 
             # Log refinement
             self.distillation_log.append({
                 "timestamp": datetime.now().isoformat(),
                 "type": "failure_correction",
-                "pattern_key": failed_pattern_key,
+                "pattern_key": pattern_key,
                 "expert_correction": expert_correction
             })
 
             self._save_patterns()
             self._save_log()
 
-            return failed_pattern_key
+            return pattern_key
         except json.JSONDecodeError:
             print(f"Failed to parse refined pattern: {response}")
             return None
