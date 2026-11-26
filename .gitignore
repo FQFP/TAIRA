@@ -11,3 +11,8 @@ venv/
 
 # Generated local model artifacts
 *.npy
+
+# Experiment outputs and private execution traces
+**/logs/
+results/
+storage/thought_patterns/pending_failures.json
