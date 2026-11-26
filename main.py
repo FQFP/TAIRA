@@ -1,149 +1,107 @@
-import os
 import logging
+import os
+from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 import yaml
-from datetime import datetime
 
-from core.manager_core import TAIRAManager
+from agents.interact_agent import InteractorAgent
 from agents.item_retrieval_agent import ItemRetrievalAgent
 from agents.searcher_agent import SearcherAgent
-from agents.interact_agent import InteractorAgent
 from agents.task_interpreter_agent import InterpreterAgent
+from core.manager_core import TAIRAManager
 from utils.memory import Memory
 
 
-pd.set_option('display.width', 1000)
-pd.set_option('display.max_colwidth', 1000)
-pd.set_option('display.unicode.east_asian_width', True)
+ROOT = Path(__file__).resolve().parent
+
+
+def load_config():
+    with (ROOT / "system_config.yaml").open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 def setup_logger(log_file):
-    """Setup logger for each query."""
-    logger = logging.getLogger(log_file)
+    logger = logging.getLogger(str(log_file))
     logger.setLevel(logging.DEBUG)
-
-    if logger.hasHandlers():
-        logger.handlers.clear()
-
-    f_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
-    f_handler.setLevel(logging.DEBUG)
-    f_format = logging.Formatter('%(asctime)s - %(message)s')
-    f_handler.setFormatter(f_format)
-    logger.addHandler(f_handler)
-
+    logger.handlers.clear()
+    handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+    logger.addHandler(handler)
     return logger
 
 
 def main():
-    # Load configuration
-    with open('system_config.yaml') as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
+    config = load_config()
+    domain = config["DOMAIN"]
+    domain_path = ROOT / "data" / domain
+    query_file = domain_path / "query_data1.csv"
+    if not query_file.exists():
+        raise FileNotFoundError(f"Query dataset not found: {query_file}")
 
-    print("Configuration:", config)
+    df = pd.read_csv(query_file, encoding="ISO-8859-1").head(int(config.get("QUERY_NUMBER", 10)))
+    if "classification" in df.columns:
+        df = df[df["classification"] == 1]
 
-    domain = config['DOMAIN']
-    method = config['METHOD']
-    query_number = config['QUERY_NUMBER']
-    domain_path = f"data/{domain}"
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_dir = domain_path / "logs" / f'{config.get("METHOD", "TAIRA")}-{timestamp}'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    results_csv = log_dir / f'result-{config.get("METHOD", "TAIRA")}-{timestamp}.csv'
 
-    # Load queries
-    df = pd.read_csv(f"{domain_path}/query_data1.csv", encoding='ISO-8859-1').head(query_number)
-    df = df[df['classification'] == 1]
-
-    # Setup logging
-    now = datetime.now()
-    formatted_time = now.strftime("%Y-%m-%d %H_%M_%S")
-    log_dir = f'{domain_path}/logs/{method}-{formatted_time}'
-    os.makedirs(log_dir, exist_ok=True)
-
-    results_csv = f'{log_dir}/result-{method}-{formatted_time}.csv'
-
-    # Initialize agents (shared across queries)
     memory = Memory()
-    item_agent = ItemRetrievalAgent(memory)
-    searcher_agent = SearcherAgent()
+    item_agent = ItemRetrievalAgent(memory, config)
+    searcher_agent = SearcherAgent(memory, config)
     interactor_agent = InteractorAgent(memory)
     interpreter = InterpreterAgent(memory)
 
-    # Process queries
+    rows = []
     for index, row in df.iterrows():
-        log_file = f'{log_dir}/log_{index + 1}.log'
-        logger = setup_logger(log_file)
+        logger = setup_logger(log_dir / f"log_{index + 1}.log")
+        user_input = str(row.get("new_query", ""))
+        preference = str(row.get("preferences", ""))
+        item_agent.preference = preference
+        row_config = dict(config)
+        row_config["USER_PREFERENCE"] = preference
 
-        print(f"Processing query {index + 1}")
-
-        user_input = row['new_query']
-        target_count = row['target_count']
-        targets = row['targets']
-        user_preference = row['preferences']
-
-        if domain in ["amazon_clothing", "amazon_music"]:
-            target_product = f"{row['title']} | {row['category']}"
+        if domain in ("amazon_clothing", "amazon_music"):
+            target_product = f'{row.get("title", "")} | {row.get("category", "")}'
         elif domain == "amazon_beauty":
-            target_product = f"{row['title']} | {row['description']} | {row['category']}"
+            target_product = f'{row.get("title", "")} | {row.get("description", "")} | {row.get("category", "")}'
         else:
             target_product = "no target"
 
         try:
-            # Create manager for this query
             manager = TAIRAManager(
-                memory,
-                user_input,
-                target_product,
-                targets,
-                target_count,
-                user_preference,
-                config,
-                logger=logger
+                memory=memory,
+                user_input=user_input,
+                target_product=target_product,
+                targets=str(row.get("targets", "")),
+                target_count=int(row.get("target_count", 1)),
+                preference=preference,
+                config=row_config,
+                logger=logger,
             )
+            for agent in (item_agent, searcher_agent, interactor_agent, interpreter):
+                manager.register_agent(agent)
 
-            # Register agents
-            manager.register_agent(item_agent)
-            manager.register_agent(searcher_agent)
-            manager.register_agent(interactor_agent)
-            manager.register_agent(interpreter)
-
-            # Execute
             hit_rate, mrr, ndcg, fail_flag, pattern_key = manager.delegate_task()
-
-            row['hit_rate'] = hit_rate
-            row['mrr'] = mrr
-            row['ndcgs'] = ndcg
-            row['fail'] = 1 if fail_flag else 0
-            row['pattern_used'] = pattern_key
-
-        except Exception as e:
-            error_msg = f"Error processing query {index + 1}: {str(e)}"
-            print(error_msg)
-            logger.error(error_msg)
-
-            row['hit_rate'] = 0
-            row['mrr'] = 0
-            row['ndcgs'] = 0
-            row['fail'] = 1
-            row['pattern_used'] = "error"
-
-        # Save result
-        row_df = pd.DataFrame([row])
-        if not os.path.exists(results_csv):
-            row_df.to_csv(results_csv, mode='w', header=True, index=False)
-        else:
-            row_df.to_csv(results_csv, mode='a', header=False, index=False)
-
-        # Reset memory
+            row["hit_rate"], row["mrr"], row["ndcgs"] = hit_rate, mrr, ndcg
+            row["fail"], row["pattern_used"] = int(bool(fail_flag)), pattern_key
+        except Exception:
+            logger.exception("Query %s failed", index + 1)
+            row["hit_rate"], row["mrr"], row["ndcgs"] = 0.0, 0.0, 0.0
+            row["fail"], row["pattern_used"] = 1, "error"
+        rows.append(row)
         memory.remove_data()
         logger.handlers.clear()
 
-    # Calculate averages
-    complete_df = pd.read_csv(results_csv, encoding='ISO-8859-1')
-    mean_row = pd.DataFrame({
-        'hit_rate': [complete_df['hit_rate'].mean()],
-        'mrr': [complete_df['mrr'].mean()],
-        'ndcgs': [complete_df['ndcgs'].mean()],
-        'fail': [1 - complete_df['fail'].mean()]
-    })
-    mean_row.to_csv(results_csv, mode='a', header=False, index=False)
-
+    if rows:
+        result_df = pd.DataFrame(rows)
+        result_df.to_csv(results_csv, index=False, encoding="utf-8-sig")
+        metric_cols = [c for c in ("hit_rate", "mrr", "ndcgs", "fail") if c in result_df.columns]
+        summary = result_df[metric_cols].mean(numeric_only=True).to_frame().T
+        summary.to_csv(log_dir / "summary.csv", index=False)
     print(f"Results saved to {results_csv}")
 
 
