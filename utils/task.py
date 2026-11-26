@@ -78,5 +78,5 @@ def extract_braces_content(s):
     if not s:
         return None
     s = s.replace("\\'", "'")
-    match = re.search(r"\\{.*\\}", s, re.DOTALL)
+    match = re.search(r"\{.*\}", s, re.DOTALL)
     return match.group(0) if match else None
