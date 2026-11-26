@@ -67,7 +67,7 @@ class ItemRetrievalAgent(Agent):
         }
         template = prompts.get(self.domain, PRODUCT_RETRIEVE_PROMPT)
         prompt = template.replace("{user_input}", str(user_input))
-        preference = self.config.get("USER_PREFERENCE", "")
+        preference = getattr(self, "preference", "") or self.config.get("USER_PREFERENCE", "")
         messages = [
             {"role": "system", "content": "Extract a concise product type and attributes for catalog retrieval."},
             {"role": "user", "content": f"User preference: {preference}\n{prompt}"},
