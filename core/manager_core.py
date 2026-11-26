@@ -37,37 +37,47 @@ class TAIRAManager:
     def register_agent(self, agent):
         self.agents[agent.name] = agent
 
-    def delegate_task(self):
-        from user_simulate.evaluate_agent import EvaluateAgent
+    def _task_route(self, error=None):
+        return {
+            "query": self.user_input,
+            "execution_log": self.execution_log,
+            "memory_history": self.memory.get_history(),
+            "error": repr(error) if error else None,
+        }
 
+    def delegate_task(self):
         self.logger.info("Starting TAIRA task: %s", self.user_input)
         self.memory.add_input(self.user_input)
+        pattern_key = None
+        try:
+            thought_pattern = None
+            if self.config.get("METHOD", "TAIRA") == "TAIRA":
+                pattern_key, thought_pattern = self.pattern_matcher.select_best_pattern(
+                    self.user_input, self.preference
+                )
+            self.used_pattern_key = pattern_key
+            self.logger.info("Selected thought pattern: %s", pattern_key or "none")
 
-        pattern_key, thought_pattern = None, None
-        if self.config.get("METHOD", "TAIRA") == "TAIRA":
-            pattern_key, thought_pattern = self.pattern_matcher.select_best_pattern(
-                self.user_input, self.preference
+            initial_plan = self.hierarchical_planner.create_initial_plan(
+                self.user_input, self.preference, thought_pattern
             )
-        self.used_pattern_key = pattern_key
-        self.logger.info("Selected thought pattern: %s", pattern_key or "none")
+            self._validate_plan(initial_plan)
+            self.memory.add_plan(initial_plan)
+            self.logger.debug("Initial plan: %s", initial_plan)
 
-        initial_plan = self.hierarchical_planner.create_initial_plan(
-            self.user_input, self.preference, thought_pattern
-        )
-        self._validate_plan(initial_plan)
-        self.memory.add_plan(initial_plan)
-        self.logger.debug("Initial plan: %s", initial_plan)
+            hit_rate, mrr, ndcg, fail_flag = self._execute_hierarchical_plan(
+                initial_plan, thought_pattern
+            )
+            if self.config.get("ENABLE_LEARNING", False):
+                success = (not fail_flag) and (hit_rate > 0)
+                self._distill_experience(success, pattern_key)
+            return hit_rate, mrr, ndcg, fail_flag, pattern_key or "unknown"
 
-        result = self._execute_hierarchical_plan(initial_plan, thought_pattern)
-        hit_rate, mrr, ndcg, fail_flag = result
-
-        if self.config.get("ENABLE_LEARNING", False):
-            # Do not treat a non-zero hit alone as success: the evaluator's failure
-            # flag is also part of the task outcome.
-            success = (not fail_flag) and (hit_rate > 0)
-            self._distill_experience(success, pattern_key)
-
-        return hit_rate, mrr, ndcg, fail_flag, pattern_key or "unknown"
+        except Exception as exc:
+            self.logger.exception("TAIRA task failed")
+            if self.config.get("ENABLE_LEARNING", False):
+                self._save_pending_failure(self._task_route(exc), pattern_key)
+            raise
 
     @staticmethod
     def _validate_plan(plan_text):
@@ -78,6 +88,9 @@ class TAIRAManager:
         tasks = plan.get("sub_tasks")
         if not isinstance(tasks, dict) or not tasks:
             raise ValueError("Planner output must contain a non-empty sub_tasks object.")
+        for key, task in tasks.items():
+            if not isinstance(task, dict) or not task.get("content") or not task.get("agent"):
+                raise ValueError(f"Malformed subtask: {key}")
         last_agent = list(tasks.values())[-1].get("agent")
         if last_agent not in ("PlannerAgent", "InteractorAgent"):
             raise ValueError("The final planned subtask must use PlannerAgent or InteractorAgent.")
@@ -97,9 +110,6 @@ class TAIRAManager:
         while True:
             sub_tasks = task_plan["sub_tasks"]
             task_keys = list(sub_tasks.keys())
-            if not task_keys:
-                raise ValueError("The current plan contains no subtasks.")
-
             for task_key in task_keys[:-1]:
                 sub_task = sub_tasks[task_key]
                 agent_name = sub_task["agent"]
@@ -115,7 +125,9 @@ class TAIRAManager:
                 query = interpreter.process_output(sub_task["content"], agent_name, output)
                 self.turn += 1
                 result = agent.execute_task(query)
-                output = json.dumps(result, ensure_ascii=False, default=str) if not isinstance(result, str) else result
+                output = result if isinstance(result, str) else json.dumps(
+                    result, ensure_ascii=False, default=str
+                )
                 self.memory.add_observation(agent_name, query, output)
                 self.execution_log.append({
                     "turn": self.turn, "agent": agent_name,
@@ -129,7 +141,7 @@ class TAIRAManager:
 
             if terminal_name == "InteractorAgent":
                 recommendation_text = interactor.generate_response(query)
-                match = re.search(r"\{.*\}", recommendation_text, re.DOTALL)
+                match = re.search(r"\{.*\}", recommendation_text or "", re.DOTALL)
                 if not match:
                     raise ValueError("InteractorAgent returned no JSON object.")
                 rec_json = json.loads(match.group(0))
@@ -146,7 +158,6 @@ class TAIRAManager:
 
             if terminal_name != "PlannerAgent":
                 raise ValueError(f"Unknown terminal agent: {terminal_name}")
-
             if self.turn >= int(self.config.get("MAX_AGENT_TURNS", 10)):
                 self.logger.error("Maximum agent turns reached before replanning.")
                 return 0.0, 0.0, 0.0, True
@@ -157,16 +168,31 @@ class TAIRAManager:
             )
             new_plan = self._validate_plan(new_plan_text)
             self.memory.add_plan(new_plan_text)
-            # Preserve old tasks for complete traceability, but only execute newly
-            # generated tasks on the next pass.
             task_plan = {"sub_tasks": new_plan["sub_tasks"]}
 
-    def _distill_experience(self, success: bool, used_pattern_key: Optional[str]):
-        task_route = {
+    def _save_pending_failure(self, task_route, used_pattern_key):
+        pending_path = Path("storage/thought_patterns/pending_failures.json")
+        pending_path.parent.mkdir(parents=True, exist_ok=True)
+        if pending_path.exists():
+            try:
+                pending = json.loads(pending_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                pending = []
+        else:
+            pending = []
+        pending.append({
             "query": self.user_input,
-            "execution_log": self.execution_log,
-            "memory_history": self.memory.get_history(),
-        }
+            "used_pattern_key": used_pattern_key,
+            "task_route": task_route,
+        })
+        pending_path.write_text(
+            json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.last_failure_route = task_route
+        self.logger.info("Failure trace saved for expert correction: %s", pending_path)
+
+    def _distill_experience(self, success: bool, used_pattern_key: Optional[str]):
+        task_route = self._task_route()
         if success:
             self.logger.info("Distilling successful execution into a reusable pattern.")
             new_key = self.pattern_distiller.distill_from_success(
@@ -174,38 +200,17 @@ class TAIRAManager:
             )
             self.logger.info("Distilled pattern: %s", new_key or "none")
         else:
-            # Preserve the failure trace until a human supplies a correction.
-            self.last_failure_route = task_route
-            pending_path = Path("storage/thought_patterns/pending_failures.json")
-            pending_path.parent.mkdir(parents=True, exist_ok=True)
-            pending = []
-            if pending_path.exists():
-                try:
-                    pending = json.loads(pending_path.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    pending = []
-            pending.append({
-                "query": self.user_input,
-                "used_pattern_key": used_pattern_key,
-                "task_route": task_route,
-            })
-            pending_path.write_text(
-                json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            self.logger.info("Failure trace saved for expert correction: %s", pending_path)
+            self._save_pending_failure(task_route, used_pattern_key)
 
-    def apply_expert_correction(self, expert_correction: str, task_route=None, failed_pattern_key=None):
-        """Apply explicit human feedback to a failed trajectory and refine its pattern."""
+    def apply_expert_correction(
+        self, expert_correction: str, task_route=None, failed_pattern_key=None
+    ):
         if not expert_correction or not expert_correction.strip():
             raise ValueError("expert_correction must not be empty.")
         route = task_route or self.last_failure_route
         key = failed_pattern_key or self.used_pattern_key
         if route is None:
             raise ValueError("No failed execution trace is available.")
-        if not key:
-            raise ValueError("No matched thought pattern is available to refine.")
-        updated_key = self.pattern_distiller.distill_from_failure(
+        return self.pattern_distiller.distill_from_failure(
             route, expert_correction.strip(), key
         )
-        # PatternMatcher reloads patterns at the beginning of each matching call.
-        return updated_key
