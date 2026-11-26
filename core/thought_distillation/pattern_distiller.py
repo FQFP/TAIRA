@@ -106,7 +106,7 @@ class PatternDistiller:
 
         # Parse and save pattern
         try:
-            match = re.search(r'\\{.*\\}', response or '', re.DOTALL)
+            match = re.search(r'\{.*\}', response or '', re.DOTALL)
             if not match:
                 raise json.JSONDecodeError('No JSON object found', response or '', 0)
             new_pattern = json.loads(match.group(0))
@@ -182,7 +182,7 @@ class PatternDistiller:
         response = get_completion(messages)
 
         try:
-            match = re.search(r'\\{.*\\}', response or '', re.DOTALL)
+            match = re.search(r'\{.*\}', response or '', re.DOTALL)
             if not match:
                 raise json.JSONDecodeError('No JSON object found', response or '', 0)
             refined_pattern = json.loads(match.group(0))
