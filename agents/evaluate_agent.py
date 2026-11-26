@@ -6,7 +6,7 @@ import pandas as pd
 import yaml
 
 from utils.task import extract_braces_content
-from .agent import Agent
+from .base_agent import Agent
 
 
 def calculate_mrr(ranked_items):
