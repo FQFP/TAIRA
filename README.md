@@ -98,7 +98,7 @@ This branch is a CPU-first research implementation. It keeps GPT-based planning 
 
 3. Check `system_config.yaml`. Thought Pattern Distillation is enabled by default (`ENABLE_LEARNING: true`).
 
-4. Run a small smoke test first by setting `QUERY_NUMBER: 1`, then run:
+4. Run the offline component smoke test (no API key needed):\n\n   ```bash\n   python scripts/smoke_test.py\n   ```\n\n5. Run a small end-to-end test by setting `QUERY_NUMBER: 1`, then run:
 
    ```bash
    python main.py
