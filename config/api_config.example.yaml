@@ -1,7 +1,10 @@
-# Copy this file to api_config.yaml and enter your own API credentials.
-# Never commit api_config.yaml; it is excluded by the repository .gitignore.
+# Copy to config/api_config.yaml and fill in credentials locally.
+# api_config.yaml is ignored by Git; never commit real API keys.
 llm:
   provider: "openai"
   model: "gpt-4o-2024-08-06"
   base_url: "https://api.openai.com/v1"
-  api_key: "YOUR_API_KEY"
+  api_key: "YOUR_OPENAI_API_KEY"
+
+deepseek:
+  api_key: "YOUR_DEEPSEEK_API_KEY"
