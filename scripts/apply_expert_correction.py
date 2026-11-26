@@ -31,8 +31,6 @@ def main():
 
     record = records[index]
     pattern_key = record.get("used_pattern_key")
-    if not pattern_key:
-        raise ValueError("This failure did not use a thought pattern, so there is no existing pattern to refine.")
 
     distiller = PatternDistiller(str(ROOT / "storage" / "thought_patterns"))
     updated_key = distiller.distill_from_failure(
@@ -42,7 +40,8 @@ def main():
         raise RuntimeError("Pattern refinement failed; the pending failure was kept.")
     records.pop(index)
     PENDING.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Updated {updated_key}; removed corrected failure record {index}.")
+    action = "refined" if pattern_key else "created"
+    print(f"Successfully {action} {updated_key}; removed corrected failure record {index}.")
 
 
 if __name__ == "__main__":
