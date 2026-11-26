@@ -76,3 +76,44 @@ To start the interactive recommendation simulation and evaluation:
 python main.py
 ```
 
+
+
+## Local reproduction branch setup
+
+This branch is a CPU-first research implementation. It keeps GPT-based planning and recommendation, uses DeepSeek Search/Fetch for web knowledge, and uses BM25 for local product retrieval so no CUDA GPU is required.
+
+1. Install the lightweight dependencies:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. Create your private API configuration (do not commit it):
+
+   ```bash
+   cp config/api_config.example.yaml config/api_config.yaml
+   ```
+
+   Fill in `llm.api_key` and `deepseek.api_key`. The real `config/api_config.yaml` is ignored by Git.
+
+3. Check `system_config.yaml`. Thought Pattern Distillation is enabled by default (`ENABLE_LEARNING: true`).
+
+4. Run a small smoke test first by setting `QUERY_NUMBER: 1`, then run:
+
+   ```bash
+   python main.py
+   ```
+
+### Learning from failed executions
+
+Failed task trajectories are saved to `storage/thought_patterns/pending_failures.json`. After inspecting a failure, provide a human correction:
+
+```bash
+python scripts/apply_expert_correction.py --index 0 --correction "Explain what the plan missed and how the pattern should change."
+```
+
+Successful trajectories are distilled automatically when `ENABLE_LEARNING` is true. The pattern matcher reloads the pattern file for each new task, so newly distilled patterns can be used by subsequent queries in the same experiment run.
+
+### Retrieval backend
+
+The current branch uses BM25 for CPU-only catalog retrieval. This is an intentional lightweight implementation for mechanism development; it is not the original BGE-M3 + reranker retrieval stack.
