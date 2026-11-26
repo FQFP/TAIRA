@@ -74,11 +74,11 @@ class ItemRetrievalAgent(Agent):
         ]
         return get_completion(messages, llm=self.config.get("QUERY_MODEL"))
 
-    def execute_task(self, query):
-        structured_query = self.parse_user_input(query)
-        tokens = self._tokenize(structured_query)
+    def retrieve(self, query):
+        """Retrieve catalog candidates with BM25; exposed separately for offline smoke tests."""
+        tokens = self._tokenize(query)
         if not tokens:
-            tokens = self._tokenize(query)
+            return []
         scores = self.bm25.get_scores(tokens)
         top_n = min(int(self.config.get("TOPN_ITEMS", 500)), len(scores))
         top_k = int(self.config.get("TOPK_ITEMS", 10))
@@ -87,3 +87,7 @@ class ItemRetrievalAgent(Agent):
         result = self.df.iloc[selected][["product_id", "project_info"]].copy()
         result["project_info"] = result["project_info"].str.slice(0, 800)
         return result.rename(columns={"product_id": "id", "project_info": "title"}).to_dict("records")
+
+    def execute_task(self, query):
+        structured_query = self.parse_user_input(query)
+        return self.retrieve(structured_query or query)
