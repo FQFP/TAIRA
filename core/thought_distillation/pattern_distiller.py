@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime
 from typing import Dict, Optional
 from utils.task import get_completion
@@ -105,7 +106,10 @@ class PatternDistiller:
 
         # Parse and save pattern
         try:
-            new_pattern = json.loads(response)
+            match = re.search(r'\\{.*\\}', response or '', re.DOTALL)
+            if not match:
+                raise json.JSONDecodeError('No JSON object found', response or '', 0)
+            new_pattern = json.loads(match.group(0))
             pattern_key = self._generate_pattern_key()
             self.patterns[pattern_key] = new_pattern
 
@@ -178,7 +182,10 @@ class PatternDistiller:
         response = get_completion(messages)
 
         try:
-            refined_pattern = json.loads(response)
+            match = re.search(r'\\{.*\\}', response or '', re.DOTALL)
+            if not match:
+                raise json.JSONDecodeError('No JSON object found', response or '', 0)
+            refined_pattern = json.loads(match.group(0))
             self.patterns[failed_pattern_key] = refined_pattern
 
             # Log refinement
