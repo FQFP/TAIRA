@@ -1,0 +1,13 @@
+# Local API credentials
+config/api_config.yaml
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Generated local model artifacts
+*.npy
