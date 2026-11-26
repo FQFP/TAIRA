@@ -6,11 +6,13 @@ python scripts/apply_expert_correction.py --index 0 --correction "The plan skipp
 import argparse
 import json
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from core.thought_distillation.pattern_distiller import PatternDistiller
 
-
-ROOT = Path(__file__).resolve().parents[1]
 PENDING = ROOT / "storage" / "thought_patterns" / "pending_failures.json"
 
 
