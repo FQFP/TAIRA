@@ -169,9 +169,9 @@ class PatternDistiller:
         prompt = (
             f"Failed task route:\n{json.dumps(task_route, indent=2, ensure_ascii=False)}\n\n"
             f"Expert correction: {expert_correction}\n\n"
-            f"Current pattern to refine:\n{json.dumps(old_pattern, indent=2, ensure_ascii=False)}\n\n"
-            "Revise the pattern to address the failure. "
-            "Output the improved pattern in JSON format:\n"
+            f"Current pattern to refine (null means no pattern was matched):\n{json.dumps(old_pattern, indent=2, ensure_ascii=False)}\n\n"
+            "If a pattern exists, revise it to address the failure. If no pattern exists, create a new reusable pattern from the failed trajectory and expert correction. "
+            "Output the pattern in JSON format:\n"
             "{\n"
             "  \"task_description\": \"...\",\n"
             "  \"solution_description\": \"...\",\n"
